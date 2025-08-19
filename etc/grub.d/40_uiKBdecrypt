@@ -1,18 +1,26 @@
-# Define a function to draw the GUI keyboard and handle input.
-# This function would be called by a new grub menuentry.
 function luks_gui_keyboard {
 
-  # Define the keyboard layout as an array of characters.
+  # Define the standard keyboard layout as an array of characters.
   local keys_array=(
-    "1" "2" "3" "4" "5" "6" "7" "8" "9" "0" "DEL"
-    "q" "w" "e" "r" "t" "y" "u" "i" "o" "p" "CAPS"
-    "a" "s" "d" "f" "g" "h" "j" "k" "l" "ENTER"
-    "z" "x" "c" "v" "b" "n" "m" "-" "_" "SHIFT"
+    "\`" "1" "2" "3" "4" "5" "6" "7" "8" "9" "0" "-" "=" "DEL" "ESC"
+    "TAB" "q" "w" "e" "r" "t" "y" "u" "i" "o" "p" "[" "]" "\\" "CAPS"
+    "a" "s" "d" "f" "g" "h" "j" "k" "l" ";" "'" "ENTER"
+    "z" "x" "c" "v" "b" "n" "m" "," "." "/"
+    "CTRL" "ALT" "SPACE" "BACK"
+  )
+
+  # Define the shifted layout with symbols and uppercase letters.
+  local caps_keys_array=(
+    "~" "!" "@" "#" "$" "%" "^" "&" "*" "(" ")" "_" "+" "DEL" "ESC"
+    "TAB" "Q" "W" "E" "R" "T" "Y" "U" "I" "O" "P" "{" "}" "|" "CAPS"
+    "A" "S" "D" "F" "G" "H" "J" "K" "L" ":" "\"" "ENTER"
+    "Z" "X" "C" "V" "B" "N" "M" "<" ">" "?"
+    "CTRL" "ALT" "SPACE" "BACK"
   )
 
   # Dimensions for the keyboard
-  local num_rows=4
-  local num_cols=11
+  local num_rows=5
+  local num_cols=15
 
   # Cursor position and password string
   local cursor_x=0
@@ -22,26 +30,35 @@ function luks_gui_keyboard {
 
   # Function to draw the full keyboard.
   function draw_keyboard {
-    # Clear the screen (example command)
+    # Clear the screen.
     clear
+
+    # Choose the correct key array based on caps_lock_on state.
+    local current_keys
+    if [ "$caps_lock_on" = true ]; then
+      current_keys=("${caps_keys_array[@]}")
+    else
+      current_keys=("${keys_array[@]}")
+    fi
 
     # Iterate through the keys array and draw each key.
     local i=0
-    for key in "${keys_array[@]}"; do
+    for key in "${current_keys[@]}"; do
       local row=$((i / num_cols))
       local col=$((i % num_cols))
 
       # Set initial colors for the key.
       set_color_normal=white/black
+      local display_key="$key"
 
-      # Highlight the currently selected key.
+      # Add the * signifier to the selected key.
       if [ $row -eq $cursor_y ] && [ $col -eq $cursor_x ]; then
         set_color_highlight=green/black
+        display_key="$key*"
       fi
 
-      # Print the key at a specific position (using grub_term_putchar)
-      # This is a conceptual command, not a real one.
-      grub_term_putchar "$key" at $((col * 4)) $((row * 2 + 5))
+      # Print the key at a specific position.
+      grub_term_putchar "$display_key" at $((col * 4)) $((row * 2 + 5))
 
       i=$((i + 1))
     done
@@ -49,23 +66,15 @@ function luks_gui_keyboard {
 
   # Function to update only the cursor's visual state.
   function update_cursor_display {
-    # Un-highlight the previous key
-    local prev_x=...
-    local prev_y=...
-    set_color_normal=white/black
-    grub_term_putchar "${keys_array[prev_key_index]}" at $((prev_x * 4)) $((prev_y * 2 + 5))
-
-    # Highlight the new key
-    local current_key="${keys_array[cursor_index]}"
-    set_color_highlight=green/black
-    grub_term_putchar "$current_key" at $((cursor_x * 4)) $((cursor_y * 2 + 5))
+    # Redraw the entire keyboard to ensure correct state.
+    draw_keyboard
   }
 
   # Main loop for keyboard interaction.
   while true; do
     draw_keyboard
 
-    # Wait for a key press (grub_getkey is a real function)
+    # Wait for a key press.
     local key_press
     grub_getkey key_press
 
@@ -88,20 +97,32 @@ function luks_gui_keyboard {
         update_cursor_display
         ;;
       'enter')
-        local selected_key="${keys_array[cursor_index]}"
+        # Choose the correct key array based on caps_lock_on state.
+        local current_keys
+        if [ "$caps_lock_on" = true ]; then
+          current_keys=("${caps_keys_array[@]}")
+        else
+          current_keys=("${keys_array[@]}")
+        fi
+
+        local cursor_index=$((cursor_y * num_cols + cursor_x))
+        local selected_key="${current_keys[cursor_index]}"
+
         if [ "$selected_key" = "ENTER" ]; then
           break  # Exit the loop to decrypt
         elif [ "$selected_key" = "DEL" ]; then
           password="${password%?}"
         elif [ "$selected_key" = "CAPS" ]; then
-          caps_lock_on=$((!caps_lock_on))
-          # Logic to update keys_array to uppercase/lowercase
+          caps_lock_on=$([ "$caps_lock_on" = true ] && echo false || echo true)
+        elif [ "$selected_key" = "SPACE" ]; then
+          password+=" "
         else
           # Append the selected character to the password string
           password+="$selected_key"
         fi
-        # Display the password string as you type it
-        # Example: grub_term_putchar "$password" at 0 0
+
+        # Display the password string as you type it.
+        grub_term_putchar "$password" at 0 0
         ;;
     esac
   done
@@ -109,8 +130,6 @@ function luks_gui_keyboard {
   # --- After the loop ---
 
   # Save the password to a temporary file.
-  # Assuming (hd0,gpt1) is a small, unencrypted partition.
-  # This requires a GRUB file system module to be loaded.
   grub_file_write "(hd0,gpt1)/temp_password" "$password"
 
   # Use the password from the temporary file to decrypt the LUKS volume.
